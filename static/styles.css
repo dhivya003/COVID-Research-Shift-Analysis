@@ -1,0 +1,47 @@
+:root {
+    --teal-500: #14B8A6;
+    --teal-600: #0D9488;
+    --coral-500: #FF6B6B;
+    --coral-600: #F44336;
+    --indigo-900: #4B0082;
+    --gray-100: #F3F4F6;
+    --navy-900: #1E1E2F;
+    --neon-teal: #2DD4BF;
+    --gray-800: #1F2937;
+    --gray-200: #D1D5DB;
+}
+
+.bg-teal-500 { background-color: var(--teal-500); }
+.text-teal-500 { color: var(--teal-500); }
+.bg-teal-600 { background-color: var(--teal-600); }
+.bg-coral-500 { background-color: var(--coral-500); }
+.bg-coral-600 { background-color: var(--coral-600); }
+.text-coral-500 { color: var(--coral-500); }
+.bg-indigo-900 { background-color: var(--indigo-900); }
+.bg-gray-100 { background-color: var(--gray-100); }
+.bg-navy-900 { background-color: var(--navy-900); }
+.text-navy-900 { color: var(--navy-900); }
+.text-neon-teal { color: var(--neon-teal); }
+.text-gray-800 { color: var(--gray-800); }
+.text-gray-200 { color: var(--gray-200); }
+
+.card {
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+.card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+button:hover {
+    transform: scale(1.05);
+    transition: transform 0.2s;
+}
+
+input, select {
+    transition: border-color 0.2s;
+}
+input:focus, select:focus {
+    border-color: var(--teal-500);
+    outline: none;
+}

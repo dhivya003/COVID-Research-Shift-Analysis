@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Research Trend Analysis</title>
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.4.0/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/wordcloud@1.2.2/src/wordcloud2.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <style>
+      body { margin: 0; font-family: 'Inter', sans-serif; }
+      #root { min-height: 100vh; }
+      .loading { animation: spin 1s linear infinite; }
+      @keyframes spin { 100% { transform: rotate(360deg); } }
+      .gradient-bg { background: linear-gradient(135deg, #4B0082, #F3F4F6); }
+      .dark .gradient-bg { background: linear-gradient(135deg, #1E1E2F, #2DD4BF); }
+      .card { background: rgba(255, 255, 255, 0.9); }
+      .dark .card { background: rgba(30, 30, 47, 0.9); }
+      .tooltip { 
+        position: absolute; 
+        background: #1E1E2F; 
+        color: #FFFFFF; 
+        padding: 8px; 
+        border-radius: 4px; 
+        font-size: 12px; 
+        pointer-events: none; 
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+      }
+      #trend-chart, .top-domains-chart {
+        max-width: 100%;
+        height: 400px !important;
+        display: block;
+        margin: 0 auto;
+        min-height: 400px;
+      }
+      .chart-container {
+        position: relative;
+        width: 100%;
+        height: 400px;
+        min-height: 400px;
+        margin-bottom: 20px;
+        overflow-x: auto;
+        padding: 10px;
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        background: #ffffff;
+      }
+      .dark .chart-container {
+        border-color: #4b5563;
+        background: #1f2937;
+      }
+      .chart-container svg {
+        min-width: 800px;
+      }
+      :root {
+        --teal-500: #14B8A6;
+        --teal-600: #0D9488;
+        --coral-500: #FF6B6B;
+        --coral-600: #F44336;
+        --indigo-900: #4B0082;
+        --gray-100: #F3F4F6;
+        --navy-900: #1E1E2F;
+        --neon-teal: #2DD4BF;
+        --gray-800: #1F2937;
+        --gray-200: #D1D5DB;
+      }
+      .bg-teal-500 { background-color: var(--teal-500); }
+      .text-teal-500 { color: var(--teal-500); }
+      .bg-teal-600 { background-color: var(--teal-600); }
+      .bg-coral-500 { background-color: var(--coral-500); }
+      .bg-coral-600 { background-color: var(--coral-600); }
+      .text-coral-500 { color: var(--coral-500); }
+      .bg-indigo-900 { background-color: var(--indigo-900); }
+      .bg-gray-100 { background-color: var(--gray-100); }
+      .bg-navy-900 { background-color: var(--navy-900); }
+      .text-navy-900 { color: var(--navy-900); }
+      .text-neon-teal { color: var(--neon-teal); }
+      .text-gray-800 { color: var(--gray-800); }
+      .text-gray-200 { color: var(--gray-200); }
+      .card {
+        transition: transform 0.3s, box-shadow 0.3s;
+      }
+      .card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+      }
+      button:hover {
+        transform: scale(1.05);
+        transition: transform 0.2s;
+      }
+      input, select {
+        transition: border-color 0.2s;
+      }
+      input:focus, select:focus {
+        border-color: var(--teal-500);
+        outline: none;
+      }
+      .bar:hover {
+        transform: scale(1.05);
+        transition: transform 0.2s;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
+
+      class ErrorBoundary extends React.Component {
+        state = { error: null };
+        static getDerivedStateFromError(error) {
+          return { error: error.message };
+        }
+        render() {
+          if (this.state.error) {
+            return (
+              <div className="bg-coral-500 text-white p-6 rounded-lg shadow-lg text-center m-8">
+                <h1 className="text-3xl font-bold mb-4">Application Error</h1>
+                <p className="text-lg">An error occurred: {this.state.error}</p>
+                <p>Please refresh the page or contact support.</p>
+              </div>
+            );
+          }
+          return this.props.children;
+        }
+      }
+
+      const App = () => {
+        const [domains, setDomains] = useState([]);
+        const [selectedDomain, setSelectedDomain] = useState('');
+        const [data, setData] = useState(null);
+        const [numTopics, setNumTopics] = useState(2);
+        const [periodFilter, setPeriodFilter] = useState(['pre', 'covid', 'post']);
+        const [view, setView] = useState('dashboard');
+        const [loading, setLoading] = useState(false);
+        const [error, setError] = useState(null);
+        const [darkMode, setDarkMode] = useState(false);
+        const [topDomainsByPeriod, setTopDomainsByPeriod] = useState({ pre: [], covid: [], post: [] });
+
+        useEffect(() => {
+          const fetchDomainsAndComputeTopDomains = async () => {
+            setLoading(true);
+            try {
+              const domainsRes = await axios.get('/api/domains');
+              console.log('Domains fetched:', domainsRes.data);
+              setDomains(domainsRes.data);
+              setSelectedDomain(domainsRes.data[0] || '');
+
+              const topDomains = { pre: [], covid: [], post: [] };
+              const domainPrevalence = [];
+
+              for (const domain of domainsRes.data) {
+                try {
+                  const analysisRes = await axios.get(`/api/analyze?domain=${encodeURIComponent(domain)}&num_topics=${numTopics}`);
+                  const analysisData = analysisRes.data;
+
+                  const periods = ['pre', 'covid', 'post'];
+                  const prevalenceByPeriod = {};
+
+                  periods.forEach(period => {
+                    const trendData = analysisData.trend_data?.[period] || {};
+                    const prevalences = Object.values(trendData);
+                    const maxPrevalence = prevalences.length ? Math.max(...prevalences.map(val => val || 0)) : 0;
+                    prevalenceByPeriod[period] = maxPrevalence;
+                  });
+
+                  domainPrevalence.push({ domain, prevalenceByPeriod });
+                } catch (err) {
+                  console.error(`Failed to fetch analysis for domain ${domain}:`, err);
+                }
+              }
+
+              ['pre', 'covid', 'post'].forEach(period => {
+                const sortedDomains = domainPrevalence
+                  .map(d => ({
+                    domain: d.domain,
+                    prevalence: d.prevalenceByPeriod[period]
+                  }))
+                  .filter(d => d.prevalence > 0)
+                  .sort((a, b) => b.prevalence - a.prevalence)
+                  .slice(0, 5);
+                topDomains[period] = sortedDomains;
+              });
+
+              console.log('Computed top domains by period:', topDomains);
+              setTopDomainsByPeriod(topDomains);
+              setLoading(false);
+            } catch (err) {
+              console.error('Failed to fetch data:', err);
+              setError('Failed to load data: ' + err.message);
+              setLoading(false);
+            }
+          };
+
+          fetchDomainsAndComputeTopDomains();
+        }, [numTopics]);
+
+        useEffect(() => {
+          if (selectedDomain) {
+            setLoading(true);
+            axios.get(`/api/analyze?domain=${encodeURIComponent(selectedDomain)}&num_topics=${numTopics}`)
+              .then(res => {
+                console.log('API Response for', selectedDomain, ':', JSON.stringify(res.data, null, 2));
+                setData(res.data);
+                setLoading(false);
+              }).catch(err => {
+                console.error('Failed to fetch analysis:', err);
+                setError('Failed to load analysis: ' + (err.response?.data?.message || err.message));
+                setLoading(false);
+              });
+          }
+        }, [selectedDomain, numTopics]);
+
+        const handleExport = (type) => {
+          if (!data) {
+            console.warn('No data available for export');
+            return;
+          }
+          if (type === 'png') {
+            const canvas = document.querySelector('#trend-chart') || document.querySelector('.top-domains-chart canvas');
+            if (canvas) {
+              const url = canvas.toDataURL('image/png');
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `${selectedDomain}_${view}.png`;
+              a.click();
+              URL.revokeObjectURL(url);
+            } else {
+              console.warn('No canvas found for PNG export');
+            }
+          }
+        };
+
+        return (
+          <ErrorBoundary>
+            <div className={`flex min-h-screen ${darkMode ? 'dark' : ''} gradient-bg`}>
+              <div className="fixed top-4 right-4 z-50">
+                <button
+                  onClick={() => setDarkMode(!darkMode)}
+                  className="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600 transition-colors"
+                  aria-label={`Toggle ${darkMode ? 'light' : 'dark'} mode`}
+                >
+                  {darkMode ? 'Light' : 'Dark'} Mode
+                </button>
+              </div>
+              <aside className={`w-80 ${darkMode ? 'bg-gray-800' : 'bg-white'} shadow-lg p-6 transition-all duration-300`}>
+                <div className="flex items-center mb-6">
+                  <h2 className="text-2xl font-bold text-teal-500">Research Trends</h2>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-800 dark:text-gray-200">Domain</label>
+                  <select
+                    value={selectedDomain}
+                    onChange={e => setSelectedDomain(e.target.value)}
+                    className={`w-full p-2 border rounded ${darkMode ? 'bg-gray-700 text-gray-200' : 'bg-white text-gray-800'}`}
+                    aria-label="Select domain"
+                  >
+                    {domains.map(domain => (
+                      <option key={domain} value={domain}>{domain}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-800 dark:text-gray-200">Number of Topics</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={numTopics}
+                    onChange={e => setNumTopics(parseInt(e.target.value) || 1)}
+                    className={`w-full p-2 border rounded ${darkMode ? 'bg-gray-700 text-gray-200' : 'bg-white text-gray-800'}`}
+                    aria-label="Number of topics"
+                  />
+                </div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-800 dark:text-gray-200">Period Filter</label>
+                  {['pre', 'covid', 'post'].map(p => (
+                    <label key={p} className="flex items-center text-gray-800 dark:text-gray-200">
+                      <input
+                        type="checkbox"
+                        checked={periodFilter.includes(p)}
+                        onChange={() => {
+                          if (periodFilter.includes(p)) {
+                            setPeriodFilter(periodFilter.filter(x => x !== p));
+                          } else {
+                            setPeriodFilter([...periodFilter, p]);
+                          }
+                        }}
+                        className="mr-2"
+                        aria-label={`Filter ${p}`}
+                      />
+                      {p.replace('pre', 'Pre-Covid').replace('covid', 'Covid').replace('post', 'Post-Covid')}
+                    </label>
+                  ))}
+                </div>
+                <nav>
+                  {['dashboard', 'topics', 'topic_network', 'paper_network', 'communities', 'centrality', 'trends'].map(v => (
+                    <button
+                      key={v}
+                      onClick={() => setView(v)}
+                      className={`w-full text-left p-2 mb-2 rounded transition-colors ${view === v ? 'bg-teal-500 text-white' : darkMode ? 'bg-gray-700 hover:bg-gray-600 text-gray-200' : 'bg-gray-200 hover:bg-gray-300 text-gray-800'}`}
+                      aria-label={`View ${v.replace('_', ' ')}`}
+                    >
+                      {v.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                    </button>
+                  ))}
+                </nav>
+                <div className="mt-4">
+                  <button
+                    onClick={() => handleExport('png')}
+                    className="w-full bg-coral-500 text-white p-2 rounded mb-2 hover:bg-coral-600 transition-colors"
+                    aria-label="Export PNG"
+                  >
+                    Export PNG
+                  </button>
+                </div>
+              </aside>
+              <main className="flex-1 p-8">
+                {loading && (
+                  <div className="flex justify-center items-center h-64">
+                    <div className="loading border-4 border-teal-500 border-t-transparent rounded-full w-12 h-12"></div>
+                  </div>
+                )}
+                {error && (
+                  <div className="bg-coral-500 text-white p-4 rounded mb-4 card shadow-lg" role="alert">
+                    {error}
+                  </div>
+                )}
+                {data && !loading && (
+                  <>
+                    {view === 'dashboard' && <DashboardView data={data} selectedDomain={selectedDomain} topDomainsByPeriod={topDomainsByPeriod} darkMode={darkMode} />}
+                    {view === 'topics' && <TopicsView data={data} selectedDomain={selectedDomain} periodFilter={periodFilter} darkMode={darkMode} />}
+                    {view === 'topic_network' && <NetworkView data={data} type="topic" selectedDomain={selectedDomain} periodFilter={periodFilter} darkMode={darkMode} />}
+                    {view === 'paper_network' && <NetworkView data={data} type="paper" selectedDomain={selectedDomain} periodFilter={periodFilter} darkMode={darkMode} />}
+                    {view === 'communities' && <CommunitiesView data={data} selectedDomain={selectedDomain} periodFilter={periodFilter} darkMode={darkMode} />}
+                    {view === 'centrality' && <CentralityView data={data} selectedDomain={selectedDomain} periodFilter={periodFilter} darkMode={darkMode} />}
+                    {view === 'trends' && <TrendsView data={data} selectedDomain={selectedDomain} periodFilter={periodFilter} darkMode={darkMode} />}
+                  </>
+                )}
+                {!data && !loading && !error && (
+                  <div className="text-center text-gray-800 dark:text-gray-200">Select a domain to view analysis</div>
+                )}
+              </main>
+            </div>
+          </ErrorBoundary>
+        );
+      };
+
+      const DashboardView = ({ data, selectedDomain, topDomainsByPeriod, darkMode }) => {
+        const chartRef = useRef(null);
+        const tooltipRef = useRef(null);
+
+        useEffect(() => {
+          if (!topDomainsByPeriod || !topDomainsByPeriod.pre.length || !topDomainsByPeriod.covid.length || !topDomainsByPeriod.post.length) {
+            console.warn('Incomplete top domains data:', topDomainsByPeriod);
+            return;
+          }
+
+          const container = chartRef.current;
+          if (!container) {
+            console.error('Chart container not found');
+            return;
+          }
+
+          d3.select(container).selectAll('*').remove();
+
+          const containerWidth = container.clientWidth || 800;
+          const margin = { top: 40, right: 80, bottom: 120, left: 60 };
+          const width = Math.max(800, containerWidth) - margin.left - margin.right;
+          const height = 400 - margin.top - margin.bottom;
+
+          const svg = d3.select(container)
+            .append('svg')
+            .attr('width', width + margin.left + margin.right)
+            .attr('height', height + margin.top + margin.bottom)
+            .append('g')
+            .attr('transform', `translate(${margin.left},${margin.top})`);
+
+          const periods = ['pre', 'covid', 'post'];
+          const allTopDomains = new Set();
+          periods.forEach(period => {
+            topDomainsByPeriod[period].forEach(d => allTopDomains.add(d.domain));
+          });
+          const uniqueDomains = Array.from(allTopDomains);
+
+          const chartData = uniqueDomains.map(domain => {
+            const entry = { domain };
+            periods.forEach(period => {
+              const domainData = topDomainsByPeriod[period].find(d => d.domain === domain);
+              entry[period] = domainData ? domainData.prevalence : 0;
+            });
+            return entry;
+          });
+
+          chartData.sort((a, b) => {
+            const totalA = periods.reduce((sum, period) => sum + a[period], 0);
+            const totalB = periods.reduce((sum, period) => sum + b[period], 0);
+            return totalB - totalA;
+          });
+
+          const x0 = d3.scaleBand()
+            .domain(chartData.map(d => d.domain))
+            .range([0, width])
+            .paddingInner(0.2);
+
+          const x1 = d3.scaleBand()
+            .domain(periods)
+            .range([0, x0.bandwidth()])
+            .padding(0.05);
+
+          const y = d3.scaleLinear()
+            .domain([0, d3.max(chartData, d => d3.max(periods, period => d[period])) * 1.1])
+            .range([height, 0])
+            .nice();
+
+          const periodColors = {
+            pre: ['#14B8A6', '#0D9488'],
+            covid: ['#FF6B6B', '#F44336'],
+            post: ['#4B0082', '#6A0DAD']
+          };
+
+          periods.forEach(period => {
+            const gradient = svg.append('defs')
+              .append('linearGradient')
+              .attr('id', `gradient-${period}`)
+              .attr('x1', '0%')
+              .attr('y1', '0%')
+              .attr('x2', '0%')
+              .attr('y2', '100%');
+            gradient.append('stop')
+              .attr('offset', '0%')
+              .attr('stop-color', periodColors[period][0]);
+            gradient.append('stop')
+              .attr('offset', '100%')
+              .attr('stop-color', periodColors[period][1]);
+
+            const filter = svg.append('defs')
+              .append('filter')
+              .attr('id', `shadow-${period}`)
+              .attr('x', '-50%')
+              .attr('y', '-50%')
+              .attr('width', '200%')
+              .attr('height', '200%');
+            filter.append('feGaussianBlur')
+              .attr('in', 'SourceAlpha')
+              .attr('stdDeviation', 3);
+            filter.append('feOffset')
+              .attr('dx', 2)
+              .attr('dy', 2)
+              .attr('result', 'offsetblur');
+            filter.append('feComponentTransfer')
+              .append('feFuncA')
+              .attr('type', 'linear')
+              .attr('slope', 0.5);
+            const feMerge = filter.append('feMerge');
+            feMerge.append('feMergeNode');
+            feMerge.append('feMergeNode')
+              .attr('in', 'SourceGraphic');
+          });
+
+          svg.append('g')
+            .attr('transform', `translate(0,${height})`)
+            .call(d3.axisBottom(x0))
+            .selectAll('text')
+            .attr('transform', 'rotate(-45)')
+            .attr('text-anchor', 'end')
+            .attr('dy', '0.5em')
+            .attr('dx', '-0.5em')
+            .attr('fill', darkMode ? '#D1D5DB' : '#1F2937');
+
+          svg.append('g')
+            .call(d3.axisLeft(y).ticks(5))
+            .selectAll('text')
+            .attr('fill', darkMode ? '#D1D5DB' : '#1F2937');
+
+          svg.append('text')
+            .attr('transform', 'rotate(-90)')
+            .attr('y', -margin.left + 20)
+            .attr('x', -height / 2)
+            .attr('text-anchor', 'middle')
+            .attr('fill', darkMode ? '#D1D5DB' : '#1F2937')
+            .text('Maximum Prevalence');
+
+          const groups = svg.selectAll('.domain-group')
+            .data(chartData)
+            .enter()
+            .append('g')
+            .attr('class', 'domain-group')
+            .attr('transform', d => `translate(${x0(d.domain)},0)`);
+
+          groups.selectAll('.bar')
+            .data(d => periods.map(period => ({ period, prevalence: d[period], domain: d.domain })))
+            .enter()
+            .append('rect')
+            .attr('class', 'bar')
+            .attr('x', d => x1(d.period))
+            .attr('y', d => y(d.prevalence))
+            .attr('width', x1.bandwidth())
+            .attr('height', d => height - y(d.prevalence))
+            .attr('fill', d => `url(#gradient-${d.period})`)
+            .attr('rx', 5)
+            .attr('ry', 5)
+            .attr('filter', d => `url(#shadow-${d.period})`)
+            .on('mouseover', function(event, d) {
+              d3.select(this)
+                .transition()
+                .duration(200)
+                .attr('transform', `scale(1.05)`);
+              d3.select(tooltipRef.current)
+                .style('display', 'block')
+                .style('left', `${event.pageX + 10}px`)
+                .style('top', `${event.pageY + 10}px`)
+                .html(`<strong>${d.domain}</strong><br>Period: ${d.period.replace('pre', 'Pre-Covid').replace('covid', 'Covid').replace('post', 'Post-Covid')}<br>Prevalence: ${d.prevalence.toFixed(4)}`);
+            })
+            .on('mouseout', function() {
+              d3.select(this)
+                .transition()
+                .duration(200)
+                .attr('transform', 'scale(1)');
+              d3.select(tooltipRef.current).style('display', 'none');
+            });
+
+          const legend = svg.append('g')
+            .attr('transform', `translate(${width + 10},${margin.top})`);
+
+          periods.forEach((period, i) => {
+            const legendRow = legend.append('g')
+              .attr('transform', `translate(0,${i * 20})`);
+
+            legendRow.append('rect')
+              .attr('width', 15)
+              .attr('height', 15)
+              .attr('fill', `url(#gradient-${period})`);
+
+            legendRow.append('text')
+              .attr('x', 20)
+              .attr('y', 12)
+              .attr('fill', darkMode ? '#D1D5DB' : '#1F2937')
+              .text(period.replace('pre', 'Pre-Covid').replace('covid', 'Covid').replace('post', 'Post-Covid'));
+          });
+
+          const handleResize = () => {
+            const newWidth = Math.max(800, container.clientWidth) - margin.left - margin.right;
+            svg.attr('width', newWidth + margin.left + margin.right);
+            x0.range([0, newWidth]);
+            groups.attr('transform', d => `translate(${x0(d.domain)},0)`);
+            x1.range([0, x0.bandwidth()]);
+            groups.selectAll('.bar')
+              .attr('x', d => x1(d.period))
+              .attr('width', x1.bandwidth());
+            svg.select('g[transform^="translate(0,"]').remove();
+            svg.append('g')
+              .attr('transform', `translate(0,${height})`)
+              .call(d3.axisBottom(x0))
+              .selectAll('text')
+              .attr('transform', 'rotate(-45)')
+              .attr('text-anchor', 'end')
+              .attr('dy', '0.5em')
+              .attr('dx', '-0.5em')
+              .attr('fill', darkMode ? '#D1D5DB' : '#1F2937');
+            legend.attr('transform', `translate(${newWidth + 10},${margin.top})`);
+          };
+
+          window.addEventListener('resize', handleResize);
+          return () => window.removeEventListener('resize', handleResize);
+        }, [topDomainsByPeriod, darkMode]);
+
+        const getTopDomains = () => {
+          return [
+            {
+              period: 'Pre-Covid',
+              domain: topDomainsByPeriod.pre[0]?.domain || 'N/A'
+            },
+            {
+              period: 'Covid',
+              domain: topDomainsByPeriod.covid[0]?.domain || 'N/A'
+            },
+            {
+              period: 'Post-Covid',
+              domain: topDomainsByPeriod.post[0]?.domain || 'N/A'
+            }
+          ];
+        };
+
+        return (
+          <div>
+            <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-200">Dashboard</h1>
+            <div className="flex flex-col gap-6">
+              <div className="card p-6 rounded-lg shadow-lg">
+                <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-200">Top Domains</h2>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {getTopDomains().map((item, index) => (
+                    <div key={index}>
+                      <p className="text-sm text-gray-600 dark:text-gray-400">{item.period}</p>
+                      <p className="text-lg font-bold text-teal-500">{item.domain}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="card p-6 rounded-lg shadow-lg">
+                <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-200">Top Domains by Period</h2>
+                <div className="chart-container">
+                  <div ref={chartRef} className="top-domains-chart" role="img" aria-label="Top domains by period grouped bar chart"></div>
+                  <div ref={tooltipRef} className="tooltip"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      };
+
+      const TopicsView = ({ data, selectedDomain, periodFilter, darkMode }) => {
+        const periods = ['pre', 'covid', 'post'].filter(p => periodFilter.includes(p));
+        useEffect(() => {
+          periods.forEach(period => {
+            const words = data[`${period}_wordcloud`] || [];
+            const container = document.getElementById(`${period}-wordcloud`);
+            if (!container) return;
+            container.innerHTML = '';
+            if (!words.length) {
+              container.innerHTML = '<p className="text-gray-800 dark:text-gray-200">No topics available</p>';
+              return;
+            }
+            WordCloud(container, {
+              list: words,
+              gridSize: 8,
+              weightFactor: 10,
+              fontFamily: 'Inter',
+              color: d3.schemeTableau10[periods.indexOf(period) % 10],
+              backgroundColor: 'transparent',
+              rotateRatio: 0.5,
+              rotationSteps: 2
+            });
+          });
+        }, [data, periodFilter]);
+
+        return (
+          <div>
+            <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-200">Topics for {selectedDomain}</h1>
+            {periods.map(period => (
+              <div key={period} className="mb-8 card p-6 rounded-lg shadow-lg">
+                <h2 className="text-xl font-semibold capitalize text-gray-800 dark:text-gray-200">{period}</h2>
+                <div id={`${period}-wordcloud`} className="h-64" role="img" aria-label={`${period} topic word cloud`}></div>
+                <ul className="mt-4">
+                  {data[`${period}_topics`]?.length ? (
+                    data[`${period}_topics`]
+                      .map(topic => (
+                        <li key={topic[0]} className="p-2 bg-white dark:bg-gray-700 rounded mb-2 shadow hover:bg-teal-100 dark:hover:bg-teal-900 transition-colors text-gray-800 dark:text-gray-200">
+                          Topic {topic[0]}: {topic[1]} (Prevalence: {(data.trend_data?.[period]?.[topic[0]] || 0).toFixed(3)})
+                        </li>
+                      ))
+                  ) : (
+                    <li className="text-gray-800 dark:text-gray-200">No topics available</li>
+                  )}
+                </ul>
+              </div>
+            ))}
+          </div>
+        );
+      };
+
+      const NetworkView = ({ data, type, selectedDomain, periodFilter, darkMode }) => {
+        const tooltipRef = useRef(null);
+        useEffect(() => {
+          ['pre', 'covid', 'post'].filter(p => periodFilter.includes(p)).forEach(period => {
+            const container = document.getElementById(`${period}-${type}-network`);
+            if (!container) return;
+            container.innerHTML = '';
+            const networkData = {
+              nodes: data[`${period}_${type}_network`]?.nodes || [],
+              links: data[`${period}_${type}_network`]?.links || []
+            };
+            if (!networkData.nodes.length) {
+              container.innerHTML = '<p className="text-gray-800 dark:text-gray-200">No network data available</p>';
+              return;
+            }
+            const width = 600, height = 400;
+            const svg = d3.select(container)
+              .append('svg')
+              .attr('width', width)
+              .attr('height', height)
+              .call(d3.zoom().on('zoom', function ({ transform }) {
+                svg.attr('transform', transform);
+              }))
+              .append('g');
+
+            const simulation = d3.forceSimulation(networkData.nodes)
+              .force('link', d3.forceLink(networkData.links).id(d => d.id).distance(100))
+              .force('charge', d3.forceManyBody().strength(-100))
+              .force('center', d3.forceCenter(width / 2, height / 2));
+
+            const link = svg.append('g')
+              .selectAll('line')
+              .data(networkData.links)
+              .enter().append('line')
+              .attr('stroke', '#999')
+              .attr('stroke-opacity', 0.6)
+              .attr('stroke-width', d => Math.max(1, d.weight * 2))
+              .on('mouseover', function(event, d) {
+                d3.select(this)
+                  .attr('stroke', '#14B8A6')
+                  .attr('stroke-opacity', 1);
+                const sourceNode = networkData.nodes.find(n => n.id === d.source.id);
+                const targetNode = networkData.nodes.find(n => n.id === d.target.id);
+                const tooltipContent = type === 'topic' ?
+                  `<strong>Edge</strong><br>From: ${sourceNode.title || 'N/A'}<br>To: ${targetNode.title || 'N/A'}<br>Weight: ${d.weight.toFixed(3)}<br>Shared Terms: ${d.shared_terms?.join(', ') || 'None'}` :
+                  `<strong>Edge</strong><br>From: ${sourceNode.title || 'N/A'}<br>To: ${targetNode.title || 'N/A'}<br>Similarity: ${d.weight.toFixed(3)}`;
+                d3.select(tooltipRef.current)
+                  .style('display', 'block')
+                  .style('left', `${event.pageX + 10}px`)
+                  .style('top', `${event.pageY + 10}px`)
+                  .html(tooltipContent);
+              })
+              .on('mousemove', function(event) {
+                d3.select(tooltipRef.current)
+                  .style('left', `${event.pageX + 10}px`)
+                  .style('top', `${event.pageY + 10}px`);
+              })
+              .on('mouseout', function() {
+                d3.select(this)
+                  .attr('stroke', '#999')
+                  .attr('stroke-opacity', 0.6);
+                d3.select(tooltipRef.current).style('display', 'none');
+              });
+
+            const node = svg.append('g')
+              .selectAll('circle')
+              .data(networkData.nodes)
+              .enter().append('circle')
+              .attr('r', 5)
+              .attr('fill', d => d3.schemeTableau10[d.community % 10])
+              .call(d3.drag()
+                .on('start', dragstarted)
+                .on('drag', dragged)
+                .on('end', dragended))
+              .on('mouseover', function(event, d) {
+                d3.select(this)
+                  .attr('r', 7)
+                  .attr('stroke', '#14B8A6')
+                  .attr('stroke-width', 2);
+                d3.select(tooltipRef.current)
+                  .style('display', 'block')
+                  .style('left', `${event.pageX + 10}px`)
+                  .style('top', `${event.pageY + 10}px`)
+                  .html(`<strong>${d.title || 'N/A'}</strong><br>Degree: ${d.degree?.toFixed(3) || 0}<br>Betweenness: ${d.betweenness?.toFixed(3) || 0}<br>Eigenvector: ${d.eigenvector?.toFixed(3) || 0}<br>Community: ${d.community >= 0 ? d.community : 'None'}`);
+              })
+              .on('mousemove', function(event) {
+                d3.select(tooltipRef.current)
+                  .style('left', `${event.pageX + 10}px`)
+                  .style('top', `${event.pageY + 10}px`);
+              })
+              .on('mouseout', function() {
+                d3.select(this)
+                  .attr('r', 5)
+                  .attr('stroke', null);
+                d3.select(tooltipRef.current).style('display', 'none');
+              });
+
+            simulation.on('tick', () => {
+              link
+                .attr('x1', d => d.source.x)
+                .attr('y1', d => d.source.y)
+                .attr('x2', d => d.target.x)
+                .attr('y2', d => d.target.y);
+              node
+                .attr('cx', d => d.x)
+                .attr('cy', d => d.y);
+            });
+
+            function dragstarted(event, d) {
+              if (!event.active) simulation.alphaTarget(0.3).restart();
+              d.fx = d.x;
+              d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+              d.fx = event.x;
+              d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+              if (!event.active) simulation.alphaTarget(0);
+              d.fx = null;
+              d.fy = null;
+            }
+          });
+        }, [data, periodFilter]);
+
+        return (
+          <div>
+            <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-200">{type === 'topic' ? 'Topic' : 'Paper'} Network for {selectedDomain}</h1>
+            <div ref={tooltipRef} className="tooltip"></div>
+            {['pre', 'covid', 'post'].filter(p => periodFilter.includes(p)).map(period => (
+              <div key={period} className="mb-8 card p-6 rounded-lg shadow-lg">
+                <h2 className="text-xl font-semibold capitalize text-gray-800 dark:text-gray-200">{period}</h2>
+                <div id={`${period}-${type}-network`} className="bg-white dark:bg-gray-700 rounded p-4" role="img" aria-label={`${period} ${type} network`}></div>
+              </div>
+            ))}
+          </div>
+        );
+      };
+
+      const CommunitiesView = ({ data, selectedDomain, periodFilter, darkMode }) => {
+        return (
+          <div>
+            <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-200">Communities for {selectedDomain}</h1>
+            {['topic', 'paper'].map(type => (
+              <div key={type} className="mb-8">
+                <h2 className="text-xl font-semibold capitalize text-gray-800 dark:text-gray-200">{type} Network Communities</h2>
+                {['pre', 'covid', 'post'].filter(p => periodFilter.includes(p)).map(period => {
+                  const nodes = data[`${period}_${type}_network`]?.nodes || [];
+                  const communities = data[`${period}_${type}_communities`] || {};
+                  return (
+                    <div key={period} className="mb-4 card p-6 rounded-lg shadow-lg">
+                      <h3 className="text-lg capitalize text-gray-800 dark:text-gray-200">{period}</h3>
+                      <ul className="mt-2">
+                        {Object.entries(communities).length ? (
+                          Object.entries(communities).map(([id, memberIds]) => {
+                            const memberTitles = memberIds
+                              .map(id => {
+                                const node = nodes.find(n => n.id === id);
+                                return node && node.title ? node.title : id;
+                              })
+                              .filter(title => title !== null);
+                            return (
+                              <li key={id} className="p-2 bg-white dark:bg-gray-700 rounded mb-2 shadow hover:bg-teal-100 dark:hover:bg-teal-900 transition-colors text-gray-800 dark:text-gray-200">
+                                Community {id}: {memberTitles.length ? memberTitles.join(', ') : 'No titles available'}
+                              </li>
+                            );
+                          })
+                        ) : (
+                          <li className="text-gray-800 dark:text-gray-200">No communities detected</li>
+                        )}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        );
+      };
+
+      const CentralityView = ({ data, selectedDomain, periodFilter, darkMode }) => {
+        return (
+          <div>
+            <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-200">Centrality Measures for {selectedDomain}</h1>
+            {['topic', 'paper'].map(type => (
+              <div key={type} className="mb-8">
+                <h2 className="text-xl font-semibold capitalize text-gray-800 dark:text-gray-200">{type} Network Centrality</h2>
+                {['pre', 'covid', 'post'].filter(p => periodFilter.includes(p)).map(period => {
+                  const nodes = data[`${period}_${type}_network`]?.nodes || [];
+                  return (
+                    <div key={period} className="mb-4 card p-6 rounded-lg shadow-lg">
+                      <h3 className="text-lg capitalize text-gray-800 dark:text-gray-200">{period}</h3>
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Degree Centrality</h4>
+                      <ul className="mt-2">
+                        {Object.entries(data[`${period}_${type}_centrality`]?.degree || {})
+                          .length ? (
+                            Object.entries(data[`${period}_${type}_centrality`]?.degree || {})
+                              .map(([node, value]) => {
+                                const nodeObj = nodes.find(n => n.id === node);
+                                const nodeTitle = nodeObj && nodeObj.title ? nodeObj.title : node;
+                                return (
+                                  <li key={node} className="p-2 bg-white dark:bg-gray-700 rounded mb-2 shadow hover:bg-teal-100 dark:hover:bg-teal-900 transition-colors text-gray-800 dark:text-gray-200">
+                                    {nodeTitle}: {value.toFixed(3)}
+                                  </li>
+                                );
+                              })
+                          ) : (
+                            <li className="text-gray-800 dark:text-gray-200">No centrality data above threshold</li>
+                          )}
+                      </ul>
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Betweenness Centrality</h4>
+                      <ul className="mt-2">
+                        {Object.entries(data[`${period}_${type}_centrality`]?.betweenness || {})
+                          .map(([node, value]) => {
+                            const nodeObj = nodes.find(n => n.id === node);
+                            const nodeTitle = nodeObj && nodeObj.title ? nodeObj.title : node;
+                            return (
+                              <li key={node} className="p-2 bg-white dark:bg-gray-700 rounded mb-2 shadow hover:bg-teal-100 dark:hover:bg-teal-900 transition-colors text-gray-800 dark:text-gray-200">
+                                {nodeTitle}: {value.toFixed(3)}
+                              </li>
+                            );
+                          })}
+                      </ul>
+                      <h4 className="text-sm font-semibold text-gray-800 dark:text-gray-200">Eigenvector Centrality</h4>
+                      <ul className="mt-2">
+                        {Object.entries(data[`${period}_${type}_centrality`]?.eigenvector || {})
+                          .map(([node, value]) => {
+                            const nodeObj = nodes.find(n => n.id === node);
+                            const nodeTitle = nodeObj && nodeObj.title ? nodeObj.title : node;
+                            return (
+                              <li key={node} className="p-2 bg-white dark:bg-gray-700 rounded mb-2 shadow hover:bg-teal-100 dark:hover:bg-teal-900 transition-colors text-gray-800 dark:text-gray-200">
+                                {nodeTitle}: {value.toFixed(3)}
+                              </li>
+                            );
+                          })}
+                      </ul>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        );
+      };
+
+      const TrendsView = ({ data, selectedDomain, periodFilter, darkMode }) => {
+        const chartRef = useRef(null);
+        const [renderError, setRenderError] = useState(null);
+        const [isMounted, setIsMounted] = useState(false);
+
+        useEffect(() => {
+          setIsMounted(true);
+          return () => setIsMounted(false);
+        }, []);
+
+        useEffect(() => {
+          if (!isMounted) return;
+          console.log('TrendsView rendering for', selectedDomain, 'with data:', JSON.stringify(data, null, 2));
+
+          if (!data) {
+            console.error('No data provided to TrendsView');
+            setRenderError('No data available. Please select a domain.');
+            return;
+          }
+          if (!data.trend_data) {
+            console.error('No trend_data in data for', selectedDomain);
+            setRenderError('Trend data is missing from the server response. Try selecting another domain.');
+            return;
+          }
+
+          const periods = ['pre', 'covid', 'post'].filter(p => periodFilter.includes(p));
+          if (!periods.length) {
+            console.error('No periods selected in periodFilter');
+            setRenderError('Please select at least one period (Pre-Covid, Covid, Post-Covid).');
+            return;
+          }
+
+          const hasValidData = periods.some(period => {
+            const periodData = data.trend_data[period];
+            if (periodData && Object.keys(periodData).length > 0 && Object.values(periodData).some(val => val > 0)) {
+              console.log(`Valid data found for ${period}:`, periodData);
+              return true;
+            }
+            console.warn(`No valid trend_data for period: ${period}`, periodData);
+            return false;
+          });
+
+          if (!hasValidData) {
+            console.error('No valid non-zero trend_data for selected periods');
+            setRenderError('No valid trend data available for the selected periods. Try adjusting the period filter.');
+            return;
+          }
+
+          const periodLabels = periods.map(p => p.replace('pre', 'Pre-Covid').replace('covid', 'Covid').replace('post', 'Post-Covid'));
+
+          const trendData = periods.map(period => {
+            const prevalences = Object.values(data.trend_data[period] || {});
+            const max = prevalences.length ? Math.max(...prevalences.map(val => val || 0)) : 0;
+            console.log(`Max for ${period}:`, max);
+            return max;
+          });
+
+          const isConstant = trendData.length > 1 && trendData.every(val => val === trendData[0]);
+          const isZero = trendData.every(val => val === 0);
+          if (isConstant || isZero) {
+            console.warn('Trend data is constant or zero:', trendData);
+            setRenderError('Trend data is constant or zero. Try adjusting the period filter.');
+            return;
+          }
+
+          if (chartRef.current) {
+            try {
+              console.log('Destroying existing chart for', selectedDomain);
+              chartRef.current.destroy();
+              chartRef.current = null;
+            } catch (destroyError) {
+              console.warn('Error destroying previous chart:', destroyError);
+            }
+          }
+
+          const initializeChart = () => {
+            try {
+              const canvas = document.getElementById('trend-chart');
+              if (!canvas) {
+                console.error('Canvas element not found for trend-chart');
+                setRenderError('Failed to initialize chart: Canvas element not found. Please refresh the page.');
+                return;
+              }
+              const ctx = canvas.getContext('2d');
+              if (!ctx) {
+                console.error('Canvas context not available for trend-chart');
+                setRenderError('Failed to initialize chart: Canvas context not available. Please refresh the page.');
+                return;
+              }
+
+              console.log('Initializing chart with data:', trendData);
+              chartRef.current = new Chart(ctx, {
+                type: 'line',
+                data: {
+                  labels: periodLabels,
+                  datasets: [{
+                    label: selectedDomain,
+                    data: trendData,
+                    borderColor: '#14B8A6',
+                    backgroundColor: 'rgba(20, 184, 166, 0.2)',
+                    fill: false,
+                    tension: 0.3
+                  }]
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: {
+                    y: {
+                      beginAtZero: true,
+                      title: { display: true, text: 'Maximum Prevalence', color: darkMode ? '#D1D5DB' : '#1F2937' },
+                      ticks: { color: darkMode ? '#D1D5DB' : '#1F2937' }
+                    },
+                    x: {
+                      title: { display: true, text: 'Period', color: darkMode ? '#D1D5DB' : '#1F2937' },
+                      ticks: { color: darkMode ? '#D1D5DB' : '#1F2937' }
+                    }
+                  },
+                  plugins: {
+                    legend: {
+                      labels: { color: darkMode ? '#D1D5DB' : '#1F2937' }
+                    },
+                    tooltip: {
+                      callbacks: {
+                        label: context => `${context.dataset.label}: ${context.raw.toFixed(3)}`
+                      }
+                    }
+                  }
+                }
+              });
+              console.log('Chart successfully initialized for', selectedDomain);
+              setRenderError(null);
+            } catch (error) {
+              console.error('Chart rendering error:', error);
+              setRenderError(`Failed to render chart: ${error.message}. Please refresh the page.`);
+            }
+          };
+
+          const timer = setTimeout(initializeChart, 100);
+          return () => {
+            clearTimeout(timer);
+            if (chartRef.current) {
+              try {
+                chartRef.current.destroy();
+                chartRef.current = null;
+              } catch (destroyError) {
+                console.warn('Error during chart cleanup:', destroyError);
+              }
+            }
+          };
+        }, [data, periodFilter, selectedDomain, darkMode, isMounted]);
+
+        if (!isMounted) {
+          return <div className="text-gray-800 dark:text-gray-200">Loading chart...</div>;
+        }
+
+        if (renderError) {
+          return (
+            <div className="card p-6 rounded-lg shadow-lg">
+              <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-200">Overall Trend for {selectedDomain}</h1>
+              <div className="bg-coral-500 text-white p-6 rounded-lg text-center">
+                <p className="text-lg">{renderError}</p>
+              </div>
+            </div>
+          );
+        }
+
+        return (
+          <div className="card p-6 rounded-lg shadow-lg">
+            <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-200">Overall Trend for {selectedDomain}</h1>
+            <div className="chart-container">
+              <canvas id="trend-chart" role="img" aria-label="Overall trend analysis chart"></canvas>
+            </div>
+          </div>
+        );
+      };
+
+      ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.9/babel.min.js"></script>
+  </body>
+</html>
